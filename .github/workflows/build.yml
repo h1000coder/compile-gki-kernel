@@ -45,8 +45,9 @@ jobs:
             echo "  access_process_vm" >> android/abi_gki_aarch64
           fi
 
-          # 3. Restaura sua configuração (Lembre de subir o running_new.config para a raiz do repositório)
-          cp ../running_new.config .config
+          make gki_defconfig
+
+          make olddefconfig
           
           export PATH="$GITHUB_WORKSPACE/clang-r416183b/bin:$PATH"
           export ARCH=arm64 SUBARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1
