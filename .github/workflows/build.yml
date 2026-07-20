@@ -13,21 +13,25 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bison flex build-essential libssl-dev libelf-dev bc kmod cpio rsync
 
-      - name: Clona o kernel source
+      - name: Clona o kernel source (Tag Oficial 5.10.209)
         run: |
-          # URL CORRIGIDA PARA O REPOSITÓRIO OFICIAL COMMON DA GOOGLE
-          git clone --branch android12-5.10-2024-09 --single-branch --depth 1 \
-            https://googlesource.com gki-common
+          # Inicializa a pasta de forma limpa e puxa a tag exata da build ab12292661
+          mkdir gki-common
+          cd gki-common
+          git init
+          git remote add origin https://android.googlesource.com/kernel/common
+          git fetch --depth 1 origin refs/tags/android12-5.10-2024-09_r1
+          git checkout FETCH_HEAD
 
       - name: Aplica patch do KernelSU-Next
         working-directory: gki-common
         run: |
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -
+          curl -LSs "https://githubusercontent.com" | bash -
 
       - name: Baixa o clang certo
         run: |
           git clone --depth=1 -b lineage-20.0 \
-            https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b.git \
+            https://github.com \
             clang-r416183b
 
       - name: Configura .config e Ajusta Trava GKI
@@ -46,7 +50,7 @@ jobs:
             echo "  access_process_vm" >> android/abi_gki_aarch64
           fi
           
-          # ORDEM CORRIGIDA: Variáveis exportadas antes de qualquer comando 'make'
+          # Variáveis exportadas antes de qualquer comando 'make'
           export PATH="$GITHUB_WORKSPACE/clang-r416183b/bin:$PATH"
           export ARCH=arm64 SUBARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1
           export CLANG_TRIPLE=aarch64-linux-gnu-
