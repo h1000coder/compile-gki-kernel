@@ -23,7 +23,7 @@ jobs:
 
       - name: Clona o kernel source (GKI android12-5.10)
         run: |
-          git clone --branch android12-5.10 --single-branch --depth 1 \
+          git clone --branch android12-5.10.236_r00 --single-branch --depth 1 \
             https://android.googlesource.com/kernel/common gki-common
 
       - name: Aplica patch do KernelSU-Next
