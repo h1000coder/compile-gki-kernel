@@ -44,7 +44,7 @@ jobs:
         working-directory: gki-common
         run: |
           # o arquivo running_new.config precisa estar na raiz do SEU repo
-          cp ../running_new.config .config
+          cp ../../running_new.config .config
           export PATH="$GITHUB_WORKSPACE/clang-r416183b/bin:$PATH"
           export ARCH=arm64 SUBARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1
           export CLANG_TRIPLE=aarch64-linux-gnu-
