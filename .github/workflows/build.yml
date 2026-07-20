@@ -1,69 +1,75 @@
 # .github/workflows/build-kernel.yml
-name: Build Kernel
+name: Build POCO F5 Kernel + KernelSU-Next
 
 on:
-  workflow_dispatch:  # permite rodar manualmente pelo botão "Run workflow"
+  workflow_dispatch:
+    inputs:
+      disable_trim_ksyms:
+        description: 'Desabilitar CONFIG_TRIM_UNUSED_KSYMS'
+        type: boolean
+        default: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout do repo (pra pegar o .config)
+        uses: actions/checkout@v4
+
       - name: Instala dependências
         run: |
           sudo apt-get update
-          sudo apt-get install -y bison flex build-essential libssl-dev libelf-dev bc kmod cpio rsync
+          sudo apt-get install -y bison flex build-essential libssl-dev libelf-dev bc kmod cpio rsync git curl
 
-      - name: Clona o kernel source (Tag Oficial 5.10.209)
+      - name: Clona o kernel source (GKI android12-5.10)
         run: |
-          # Inicializa a pasta de forma limpa e puxa a tag exata da build ab12292661
-          mkdir gki-common
-          cd gki-common
-          git init
-          git remote add origin https://android.googlesource.com/kernel/common
-          git fetch --depth 1 origin refs/tags/android12-5.10-2024-09_r1
-          git checkout FETCH_HEAD
+          git clone --branch android12-5.10 --single-branch --depth 1 \
+            https://android.googlesource.com/kernel/common gki-common
 
       - name: Aplica patch do KernelSU-Next
         working-directory: gki-common
         run: |
-          curl -LSs "https://githubusercontent.com" | bash -
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -
+          git status
+          git diff --stat
 
-      - name: Baixa o clang certo
+      - name: Baixa o clang certo (clang-r416183b)
         run: |
           git clone --depth=1 -b lineage-20.0 \
-            https://github.com \
+            https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b.git \
             clang-r416183b
+          clang-r416183b/bin/clang --version
 
-      - name: Configura .config e Ajusta Trava GKI
+      - name: Aplica o .config real do device
         working-directory: gki-common
         run: |
-          # 1. Modifica o build.config.gki.aarch64 para liberar e não podar o símbolo da memória
-          if [ -f "build.config.gki.aarch64" ]; then
-            sed -i 's/TRIM_NONLISTED_KMI=1/TRIM_NONLISTED_KMI=0/g' build.config.gki.aarch64
-            sed -i 's/KMI_SYMBOL_LIST_STRICT_MODE=1/KMI_SYMBOL_LIST_STRICT_MODE=0/g' build.config.gki.aarch64
-            sed -i 's/TRIM_NONALLOWED_KMI_SYMBOLS=1/TRIM_NONALLOWED_KMI_SYMBOLS=0/g' build.config.gki.aarch64
-            sed -i 's/KMI_ENFORCED=1/KMI_ENFORCED=0/g' build.config.gki.aarch64
-          fi
-
-          # 2. Injeta o símbolo de acesso na lista de aprovação de ABI por garantia
-          if [ -f "android/abi_gki_aarch64" ]; then
-            echo "  access_process_vm" >> android/abi_gki_aarch64
-          fi
-          
-          # Variáveis exportadas antes de qualquer comando 'make'
+          # o arquivo running_new.config precisa estar na raiz do SEU repo
+          cp ../running_new.config .config
           export PATH="$GITHUB_WORKSPACE/clang-r416183b/bin:$PATH"
           export ARCH=arm64 SUBARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-android-
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
-
-          # Carrega o mapa oficial correspondente à versão 5.10.209
-          make gki_defconfig
-
-          # Consolida o arquivo .config para o build
           make olddefconfig
 
-      - name: Compila o kernel
+      - name: Desabilita TRIM_UNUSED_KSYMS (opcional)
+        if: ${{ inputs.disable_trim_ksyms }}
+        working-directory: gki-common
+        run: |
+          sed -i 's/CONFIG_TRIM_UNUSED_KSYMS=y/# CONFIG_TRIM_UNUSED_KSYMS is not set/' .config
+          export PATH="$GITHUB_WORKSPACE/clang-r416183b/bin:$PATH"
+          export ARCH=arm64 SUBARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1
+          make olddefconfig
+
+      - name: Remove whitelist de CI que não existe fora do runner original
+        working-directory: gki-common
+        run: |
+          sed -i '/CONFIG_UNUSED_KSYMS_WHITELIST/d' .config
+          export PATH="$GITHUB_WORKSPACE/clang-r416183b/bin:$PATH"
+          export ARCH=arm64 SUBARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1
+          make olddefconfig
+
+      - name: Compila o kernel completo
         working-directory: gki-common
         run: |
           export PATH="$GITHUB_WORKSPACE/clang-r416183b/bin:$PATH"
@@ -71,13 +77,17 @@ jobs:
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-android-
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
-          make -j$(nproc) KCFLAGS="-Wno-error"
+          make -j$(nproc) KCFLAGS="-Wno-error" 2>&1 | tee build.log
 
-      - name: Upload do resultado
+      - name: Upload dos artefatos
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-build
+          name: kernel-build-${{ github.run_number }}
           path: |
-            gki-common/arch/arm64/boot/Image
             gki-common/arch/arm64/boot/Image.gz
+            gki-common/arch/arm64/boot/Image
             gki-common/Module.symvers
+            gki-common/.config
+            gki-common/build.log
+          retention-days: 7
