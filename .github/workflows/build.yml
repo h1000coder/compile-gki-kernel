@@ -1,0 +1,75 @@
+# .github/workflows/build-kernel.yml
+name: Build Kernel
+
+on:
+  workflow_dispatch:  # permite rodar manualmente pelo botão "Run workflow"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Instala dependências
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bison flex build-essential libssl-dev libelf-dev bc kmod cpio rsync
+
+      - name: Clona o kernel source
+        run: |
+          git clone --branch android12-5.10 --single-branch --depth 1 \
+            https://android.googlesource.com/kernel/common gki-common
+
+      - name: Aplica patch do KernelSU-Next
+        working-directory: gki-common
+        run: |
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -
+
+      - name: Baixa o clang certo
+        run: |
+          git clone --depth=1 -b lineage-20.0 \
+            https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b.git \
+            clang-r416183b
+
+      - name: Configura .config e Ajusta Trava GKI
+        working-directory: gki-common
+        run: |
+          # 1. Modifica o build.config.gki.aarch64 para liberar e não podar o símbolo da memória
+          if [ -f "build.config.gki.aarch64" ]; then
+            sed -i 's/TRIM_NONLISTED_KMI=1/TRIM_NONLISTED_KMI=0/g' build.config.gki.aarch64
+            sed -i 's/KMI_SYMBOL_LIST_STRICT_MODE=1/KMI_SYMBOL_LIST_STRICT_MODE=0/g' build.config.gki.aarch64
+            sed -i 's/TRIM_NONALLOWED_KMI_SYMBOLS=1/TRIM_NONALLOWED_KMI_SYMBOLS=0/g' build.config.gki.aarch64
+            sed -i 's/KMI_ENFORCED=1/KMI_ENFORCED=0/g' build.config.gki.aarch64
+          fi
+
+          # 2. Injeta o símbolo de acesso na lista de aprovação de ABI por garantia
+          if [ -f "android/abi_gki_aarch64" ]; then
+            echo "  access_process_vm" >> android/abi_gki_aarch64
+          fi
+
+          # 3. Restaura sua configuração (Lembre de subir o running_new.config para a raiz do repositório)
+          cp ../running_new.config .config
+          
+          export PATH="$GITHUB_WORKSPACE/clang-r416183b/bin:$PATH"
+          export ARCH=arm64 SUBARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CROSS_COMPILE=aarch64-linux-android-
+          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+          make olddefconfig
+
+      - name: Compila o kernel
+        working-directory: gki-common
+        run: |
+          export PATH="$GITHUB_WORKSPACE/clang-r416183b/bin:$PATH"
+          export ARCH=arm64 SUBARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CROSS_COMPILE=aarch64-linux-android-
+          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+          make -j$(nproc) KCFLAGS="-Wno-error"
+
+      - name: Upload do resultado
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-build
+          path: |
+            gki-common/arch/arm64/boot/Image
+            gki-common/arch/arm64/boot/Image.gz
+            gki-common/Module.symvers
